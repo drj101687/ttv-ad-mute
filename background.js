@@ -29,16 +29,16 @@ function getAdStatus(json) {
 }
 
 const adHideScript = shouldHide => `
-    ${shouldHide ? `const video = document.querySelector(".video-ref.Layout-sc-1xcs6mc-0 > video");` : ''}
-    video.style.visibility = "${shouldHide ? 'hidden' : ''}";
+    ${shouldHide ? `const _$TtvAM_vPlayer = document.querySelector(".video-ref.Layout-sc-1xcs6mc-0 > video");` : ''}
+    _$TtvAM_vPlayer.style.visibility = "${shouldHide ? 'hidden' : ''}";
     ${shouldHide ? `
-        video.insertAdjacentHTML("beforebegin", \`
-            <p id="ad-notice" style="font-size: 15px; margin-top: 8rem; text-align: center;">
+        _$TtvAM_vPlayer.insertAdjacentHTML("beforebegin", \`
+            <p id="TtvAM_ad-notice" style="font-size: 15px; margin-top: 8rem; text-align: center;">
                 (Ads playing)
             </p>
         \`);
     ` : `
-        document.querySelector("#ad-notice").remove();
+        document.querySelector("#TtvAM_ad-notice").remove();
     `}
 `;
 
