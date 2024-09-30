@@ -28,6 +28,20 @@ function getAdStatus(json) {
     }
 }
 
+const adHideScript = shouldHide => `
+    ${shouldHide ? `const _$TtvAM_vPlayer = document.querySelector(".video-ref.Layout-sc-1xcs6mc-0 > video");` : ''}
+    _$TtvAM_vPlayer.style.visibility = "${shouldHide ? 'hidden' : ''}";
+    ${shouldHide ? `
+        _$TtvAM_vPlayer.insertAdjacentHTML("beforebegin", \`
+            <p id="TtvAM_ad-notice" style="font-size: 15px; margin-top: 8rem; text-align: center;">
+                (Ads playing)
+            </p>
+        \`);
+    ` : `
+        document.querySelector("#TtvAM_ad-notice").remove();
+    `}
+`;
+
 // Request Listener
 function handleRequest(details) {
     // Filter out non-POST requests
@@ -44,12 +58,14 @@ function handleRequest(details) {
             if (adStatus === 'ad-started') {
                 // Mute the tab where ads are started
                 browser.tabs.update(details.tabId, { muted: true });
+                browser.tabs.executeScript(details.tabId, { code: adHideScript(true) });
                 mutedTabs.set(details.tabId, true);
             } else if (adStatus === 'ad-completed') {
                 // Unmute the tab where the ads are stopped,
                 // only if it was muted by the add-on
                 if (mutedTabs.get(details.tabId)) {
                     browser.tabs.update(details.tabId, { muted: false });
+                    browser.tabs.executeScript(details.tabId, { code: adHideScript(false) });
                     mutedTabs.delete(details.tabId);
                 }
             }
