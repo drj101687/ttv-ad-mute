@@ -29,7 +29,7 @@ function getAdStatus(json) {
 }
 
 const adHideScript = shouldHide => `
-    const video = document.querySelector(".video-ref.Layout-sc-1xcs6mc-0 > video");
+    ${shouldHide ? `const video = document.querySelector(".video-ref.Layout-sc-1xcs6mc-0 > video");` : ''}
     video.style.visibility = "${shouldHide ? 'hidden' : ''}";
     ${shouldHide ? `
         video.insertAdjacentHTML("beforebegin", \`
