@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Twitch.tv Ad Mute",
-  "version": "1.0",
+  "version": "1.2",
   "description": "Automatically mutes Twitch tabs when video ads start playing and unmutes the tab when the video ads stop.",
   "author": "Darrin Johnson",
   "homepage_url": "https://github.com/drj101687/ttv-ad-mute",
