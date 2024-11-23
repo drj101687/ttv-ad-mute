@@ -12,4 +12,4 @@ Twitch captures analytics about the mute status of their video player, and it ca
 
 # Installation
 
-Install in the Firefox Addons store [https://addons.mozilla.org/en-US/firefox/addon/twitch-tv-ad-mute/](https://addons.mozilla.org/en-US/firefox/addon/twitch-ad-mute/)
+Install in the Firefox Addons store [https://addons.mozilla.org/en-US/firefox/addon/twitch-tv-ad-mute/](https://addons.mozilla.org/en-US/firefox/addon/twitch-tv-ad-mute/)
