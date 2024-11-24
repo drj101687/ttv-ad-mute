@@ -1,6 +1,6 @@
 # Twitch.tv Ad Mute
 
-This is a simple Firefox Extension that listens for request to Twitch's GraphQL API, and automatically mutes appropriate Twitch tabs when the tab starts playing ads. Additionally, when the extension mutes the Firefox Tab, the Twitch video player will be visually hidden and helper text will be displayed in it's place.
+This is a simple Firefox Extension that listens for request to Twitch's GraphQL API, and automatically mutes appropriate Twitch tabs when the tab starts playing ads. Additionally, when the extension mutes the Firefox Tab, the Twitch video player will be visually hidden and helper text will be displayed in it's place. 
 
 The Tab will automatically be un-muted when the ads stop playing and the Twitch video player will be re-appear with the streamer's broadcast playing.
 
