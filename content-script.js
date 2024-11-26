@@ -1,8 +1,42 @@
+/**
+ * This class handles the Video Player on the Twitch Tab.
+ * It listens for events from the background.js that indicate
+ * if the Player should be hidden or displayed.
+ */
 class TwitchtvAdPlayerManager {
-    constructor({debugMode = false}) {
+    constructor() {
         this.player = null; // Cached player element
-        this.debugMode = debugMode;
-        this.initialize();
+        this.isHidden = false;
+        this._initialize();
+    }
+
+    /**
+     * Sets up an element that confirms initialization.
+     */
+    _initialize() {
+        browser.storage.local.get({ debugMode: false }).then((result) => {
+            this.debugMode = result.debugMode;
+        });
+        browser.runtime.onMessage.addListener((data, sender, sendResponse) => {
+            const { task, hide } = data;
+            if (typeof task === 'string') {
+                if (this.debugMode) {
+                    console.debug("TwitchtvAdPlayerManager.onMessage() Received task:  " + task);
+                }
+                switch (task) {
+                    case "toggleDebug":
+                        this.debugMode = !this.debugMode;
+                        sendResponse( { success: true });
+                        break;
+                    case "togglePlayer":
+                        this.togglePlayer(hide, sendResponse);
+                        break;
+                    default:
+                        sendResponse({ success: false, message: `Unknown task ${task}` });
+                }
+            }
+            return true;
+        });
     }
 
     /**
@@ -18,13 +52,13 @@ class TwitchtvAdPlayerManager {
      * @param {boolean} hide - Whether to hide the player.
      * @param {Function} sendResponse - Callback to send a response back to the sender.
      */
-    togglePlayer(hide, sendResponse) {
-        if (this.debugMode) {
-            console.log(`togglePlayer(${hide})`);
-        }
+    togglePlayer(hide = !this.isHidden, sendResponse) {
+
         try {
-            if (!this.player) {
-                this.player = this.getPlayer();
+            // ensure fresh player is acquired every time we toggle for ads
+            this.player = this.getPlayer();
+            if (this.debugMode) {
+                console.debug(`TwitchtvAdPlayerManager.togglePlayer() hide: ${hide}, player:`, this.player);
             }
             if (hide) {
                 this.showAdNotice();
@@ -33,10 +67,11 @@ class TwitchtvAdPlayerManager {
                 this.player.style.visibility = "";
                 this.removeAdNotice();
             }
-            sendResponse(true);
+            this.isHidden = hide;
+            sendResponse({ success: true });
         } catch (e) {
-            console.error("Error in togglePlayer:", e);
-            sendResponse({ e: e.message });
+            console.error("TwitchtvAdPlayerManager.togglePlayer() Error in togglePlayer:", e);
+            sendResponse({ success: false, message: e.message });
         }
     }
 
@@ -64,54 +99,6 @@ class TwitchtvAdPlayerManager {
         if (adNotice) {
             adNotice.remove();
         }
-    }
-
-    addToggleListener() {
-        browser.runtime.onMessage.addListener((hide, sender, sendResponse) => {
-            if (this.debugMode) {
-                console.debug("Toggle Listener called: ", hide);
-            }
-            this.togglePlayer(hide, sendResponse);
-            return true; // Indicates that the response will be asynchronous if needed
-        });
-    }
-
-    /**
-     * Sets up an element that confirms initialization.
-     */
-    initialize() {
-
-        this.addToggleListener();
-        if (this.debugMode) {
-            console.debug("Initializing TwitchtvAdPlayerManager");
-            const togglePlayerButton = document.createElement('button');
-            togglePlayerButton.innerText = "Click Here to toggle Player";
-            togglePlayerButton.classList.add('toggle-player-button');
-            togglePlayerButton.addEventListener('click', () => {
-                console.debug("Test Player Button clicked");
-                this.backgroundMessage("testTogglePlayer");
-            });
-            document.body.append(togglePlayerButton);
-            const toggleMuteButton = document.createElement('button');
-            toggleMuteButton.innerText = "Click Here to toggle Mute";
-            toggleMuteButton.classList.add('toggle-mute-button');
-            toggleMuteButton.addEventListener('click', () => {
-                console.debug("Test Mute Button clicked");
-                this.backgroundMessage("testToggleMute");
-            });
-            document.body.append(toggleMuteButton);
-            console.debug("setup finished");
-        }
-    }
-
-    backgroundMessage(message) {
-        browser.runtime.sendMessage({message: message}).then((success) => {
-            if (this.debugMode) {
-                console.debug("message was received: ", success);
-            }
-        }).catch((error) => {
-            console.error('Error sending message to background:', error);
-        });
     }
 }
 
