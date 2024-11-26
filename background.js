@@ -41,23 +41,22 @@ class BackgroundLogger {
     /**
      * This method updates the local storage value for debugMode and forwards
      * a message to the content-script to
+     * @param tabId
      * @param success
      */
-    toggleDebugMode(success) {
+    toggleDebugMode(tabId, success) {
         browser.storage.local.get({ debugMode: false }).then((result) => {
             this.debugMode = !result.debugMode;
             browser.storage.local.set({ debugMode: this.debugMode }).then(() => {
                 this.warn(`Debug Mode is now ${this.debugMode ? 'on' : 'off'}`);
             });
             // enable debug on the contentScript
-            TabUtils.getActiveTabId({logger: this}).then((tabId) => {
-                this.debug(`BackgroundLogger.toggleDebugMode() Toggling Debug Mode on tabId: [${tabId}]`);
-                browser.tabs.sendMessage(tabId, {task: 'toggleDebug'}).then((response) => {
-                    if (!response?.success) {
-                        this.error("BackgroundLogger.toggleDebugMode() Failed to toggle Debug Mode on content-script: ",  response?.error);
-                        success(false);
-                    }
-                });
+            this.debug(`BackgroundLogger.toggleDebugMode() Toggling Debug Mode on tabId: [${tabId}]`);
+            browser.tabs.sendMessage(tabId, {task: 'toggleDebug'}).then((response) => {
+                if (!response?.success) {
+                    this.error("BackgroundLogger.toggleDebugMode() Failed to toggle Debug Mode on content-script: ",  response?.error);
+                    success(false);
+                }
             });
             success(true);
         }).catch((error) => {
@@ -145,11 +144,11 @@ class BackgroundMessageHandler {
     }
 
     _initialize() {
-        browser.runtime.onMessage.addListener(this.handleMessage);
+        browser.runtime.onMessage.addListener((data, sender, sendResponse) => this.handleMessage(data, sender, sendResponse));
     }
 
     handleMessage(data, sender, sendResponse) {
-        const { task, ...params } = data;
+        const { task, tabId, ...params } = data;
         if (typeof task === 'string') {
             this.logger.debug(`BackgroundMessageHandler.onMessage() Received task: ${task} from sender:`, sender);
             switch (task) {
@@ -158,13 +157,13 @@ class BackgroundMessageHandler {
                     sendResponse(true);
                     break;
                 case "toggleDebug":
-                    this.logger.toggleDebugMode(() => sendResponse(true));
+                    this.logger.toggleDebugMode(tabId, () => sendResponse(true));
                     break;
                 case "toggleMute":
-                    this.caller.toggleMute(() => sendResponse(true));
+                    this.caller.toggleMute(tabId, () => sendResponse(true));
                     break;
                 case "togglePlayer":
-                    this.caller.togglePlayer(() => sendResponse(true));
+                    this.caller.togglePlayer(tabId, () => sendResponse(true));
                     break;
                 default:
                     this.logger.error(`Unknown task: ${task}`);
@@ -193,6 +192,7 @@ class TwitchtvAdMonitor {
         this.messenger = new BackgroundMessageHandler(this);
         this.logger = this.messenger.logger;
         this.playerManagerInitialized = true;
+        this.tabIdWithAd = null;
 
         this.logger.logMessage("TwitchtvAdMonitor.constructor() initialized with debugMode:" , this.logger.debugMode);
 
@@ -241,26 +241,25 @@ class TwitchtvAdMonitor {
 
     /**
      * This function handles toggling the player for the currently active tab.
+     * @param tabId
      * @param success callback that will be passed a single boolean argument indicating success/failure
      */
-    togglePlayer(success) {
+    togglePlayer(tabId, success) {
         this.logger.debug("TwitchtvAdMonitor.togglePlayer() called");
         if (!this.playerManagerInitialized) {
             this.logger.warn('The player manager is not initialized yet. Please try again later.');
             success(false);
             return;
         }
-        TabUtils.getActiveTabId(this).then((tabId) => {
-            this.logger.debug(`TwitchtvAdMonitor.togglePlayer() Toggling Player on tabId: [${tabId}]`);
-            browser.tabs.sendMessage(tabId, {task: 'togglePlayer'}).then((response) => {
-                if (response?.success) {
-                    this.isHidden = !this.isHidden;
-                    success(true);
-                } else {
-                    this.logger.error("TwitchtvAdMonitor.togglePlayer() Failed to toggle player: ",  response?.error);
-                    success(false);
-                }
-            });
+        this.logger.debug(`TwitchtvAdMonitor.togglePlayer() Toggling Player on tabId: [${tabId}]`);
+        browser.tabs.sendMessage(tabId, {task: 'togglePlayer'}).then((response) => {
+            if (response?.success) {
+                this.isHidden = !this.isHidden;
+                success(true);
+            } else {
+                this.logger.error("TwitchtvAdMonitor.togglePlayer() Failed to toggle player: ",  response?.error);
+                success(false);
+            }
         }).catch((error) => {
             this.logger.error('TwitchtvAdMonitor.togglePlayer() Error toggling the player:', error);
             success(false);
@@ -269,24 +268,20 @@ class TwitchtvAdMonitor {
 
     /**
      * This function handles toggling mute for the currently active tab.
+     * @param tabId
      * @param success callback that will be passed a single boolean argument indicating success/failure
      */
-    toggleMute(success) {
+    toggleMute(tabId, success) {
         this.logger.debug("TwitchtvAdMonitor.toggleMute() Toggling Mute");
-        TabUtils.getActiveTabId(this).then((tabId) => {
-            const currentMuteState = this.mutedTabs.get(tabId) || false;
-            // mute/unmute the tab where ads are started/stopped
-            browser.tabs.update(tabId, {muted: !currentMuteState});
-            if (!currentMuteState) {
-                this.mutedTabs.set(tabId, true);
-            } else {
-                this.mutedTabs.delete(tabId);
-            }
-            success(true);
-        }).catch((error) => {
-            this.logger.error('TwitchtvAdMonitor.toggleMute() Error toggling the tab mute:', error);
-            success(false);
-        });
+        const currentMuteState = this.mutedTabs.get(tabId) || false;
+        // mute/unmute the tab where ads are started/stopped
+        browser.tabs.update(tabId, {muted: !currentMuteState});
+        if (!currentMuteState) {
+            this.mutedTabs.set(tabId, true);
+        } else {
+            this.mutedTabs.delete(tabId);
+        }
+        success(true);
     }
 
     /**
@@ -298,8 +293,8 @@ class TwitchtvAdMonitor {
         // only mute/hide if not already muted || if it was muted by the add-on
         if ((adStatus === 'ad-started' && !this.mutedTabs.has(tabId)) || (adStatus === 'ad-completed' && this.mutedTabs.has(tabId))) {
             // empty callbacks, since this block isn't driven by message handler
-            this.toggleMute(()=>{});
-            this.togglePlayer(()=>{});
+            this.toggleMute(tabId,()=>{});
+            this.togglePlayer(tabId,()=>{});
         }
     }
 
@@ -321,6 +316,7 @@ class TwitchtvAdMonitor {
                     this.logger.debug(`TwitchtvAdMonitor.handleRequest() Event Status [${adStatus}]`);
                     const { tabId } = details || {};
                     if (tabId) {
+                        this.tabIdWithAd = tabId;
                         this.handleAdStatus(adStatus, tabId);
                     } else {
                         this.logger.warn("Tab ID is missing from the details object:", details);

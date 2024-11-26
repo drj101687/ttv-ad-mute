@@ -13,21 +13,34 @@ class PopupHandler {
     }
 
     toggleDebug() {
-        this._backgroundMessage({task: 'toggleDebug'}, (success) => {
-            if (success) {
-                // update local debugMode
-                this.debugMode = !this.debugMode;
-                alert(`Debug mode is now ${this.debugMode ? 'on' : 'off'}`);
-            }
+
+        TabUtils.getActiveTabId({logger: ()=>{}}).then((tabId) =>{
+            this._backgroundMessage({task: 'toggleDebug', tabId}, (success) => {
+                if (success) {
+                    // update local debugMode
+                    this.debugMode = !this.debugMode;
+                    alert(`Debug mode is now ${this.debugMode ? 'on' : 'off'}`);
+                }
+            });
+        }).catch((error)=>{
+            console.error('PopupHandler.toggleMute() Error toggling mute:', error);
         });
     }
 
     toggleMute() {
-        this._backgroundMessage({task: 'toggleMute'});
+        TabUtils.getActiveTabId({logger: ()=>{}}).then((tabId) =>{
+            this._backgroundMessage({task: 'toggleMute', tabId});
+        }).catch((error)=>{
+            console.error('PopupHandler.toggleMute() Error toggling mute:', error);
+        });
     }
 
     togglePlayer() {
-        this._backgroundMessage({task: 'togglePlayer'});
+        TabUtils.getActiveTabId({logger: ()=>{}}).then((tabId) =>{
+            this._backgroundMessage({task: 'togglePlayer', tabId});
+        }).catch((error)=>{
+            console.error('PopupHandler.togglePlayer() Error toggling player:', error);
+        });
     }
 
     _backgroundMessage(params, callback = () => {}) {
