@@ -3,40 +3,11 @@
  * It listens for events from the background.js that indicate
  * if the Player should be hidden or displayed.
  */
-class TwitchtvAdPlayerManager {
-    constructor() {
+class PlayerMonitor {
+    constructor({debugMode}) {
         this.player = null; // Cached player element
         this.isHidden = false;
-        this._initialize();
-    }
-
-    /**
-     * Sets up an element that confirms initialization.
-     */
-    _initialize() {
-        browser.storage.local.get({ debugMode: false }).then((result) => {
-            this.debugMode = result.debugMode;
-        });
-        browser.runtime.onMessage.addListener((data, sender, sendResponse) => {
-            const { task, hide } = data;
-            if (typeof task === 'string') {
-                if (this.debugMode) {
-                    console.debug("TwitchtvAdPlayerManager.onMessage() Received task:  " + task);
-                }
-                switch (task) {
-                    case "toggleDebug":
-                        this.debugMode = !this.debugMode;
-                        sendResponse( { success: true });
-                        break;
-                    case "togglePlayer":
-                        this.togglePlayer(hide, sendResponse);
-                        break;
-                    default:
-                        sendResponse({ success: false, message: `Unknown task ${task}` });
-                }
-            }
-            return true;
-        });
+        this.debugMode = debugMode;
     }
 
     /**
@@ -58,7 +29,7 @@ class TwitchtvAdPlayerManager {
             // ensure fresh player is acquired every time we toggle for ads
             this.player = this.getPlayer();
             if (this.debugMode) {
-                console.debug(`TwitchtvAdPlayerManager.togglePlayer() hide: ${hide}, player:`, this.player);
+                console.debug(`PlayerMonitor.togglePlayer() hide: ${hide}, player:`, this.player);
             }
             if (hide) {
                 this.showAdNotice();
@@ -70,7 +41,7 @@ class TwitchtvAdPlayerManager {
             this.isHidden = hide;
             sendResponse({ success: true });
         } catch (e) {
-            console.error("TwitchtvAdPlayerManager.togglePlayer() Error in togglePlayer:", e);
+            console.error("PlayerMonitor.togglePlayer() Error in togglePlayer:", e);
             sendResponse({ success: false, message: e.message });
         }
     }
@@ -100,8 +71,31 @@ class TwitchtvAdPlayerManager {
             adNotice.remove();
         }
     }
+
+    handleMessage(data, sender, sendResponse) {
+        const { task, hide } = data;
+        if (typeof task === 'string') {
+            if (this.debugMode) {
+                console.debug("PlayerMonitor.onMessage() Received task:  " + task);
+            }
+            switch (task) {
+                case "toggleDebug":
+                    this.debugMode = !this.debugMode;
+                    sendResponse( { success: true });
+                    break;
+                case "togglePlayer":
+                    this.togglePlayer(hide, sendResponse);
+                    break;
+                default:
+                    sendResponse({ success: false, message: `Unknown task ${task}` });
+            }
+        }
+        return true;
+    }
 }
 
 // Instantiate the content script class
-new TwitchtvAdPlayerManager({debugMode: false});
+const popup = new PlayerMonitor({debugMode: false});
+
+browser.runtime.onMessage.addListener(popup.handleMessage.bind(popup));
 

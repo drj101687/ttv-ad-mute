@@ -1,30 +1,153 @@
-/**
- * Static Util functions related to Firefox Tab functionality.
- * Takes an object with an optional logger property that should have
- * a debug method.
- * {@link BackgroundLogger}
- */
-class TabUtils {
-
-    static async getActiveTabId({logger}) {
-        const tab = await TabUtils.getActiveTab({logger})
-        if (tab) {
-            // Send message to the first active tab
-            logger.logMessage("found active tab", tab);
-            return tab.id;
-        }
-        return null;
+class ExtensionState {
+    initialized = false;
+    constructor() {
+        this._debugMode = true;
+        this._mutedTabs = new Map();
+        this._hiddenPlayers = new Map();
     }
 
-    static async getActiveTab({logger}){
-        const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-        if (tabs.length === 0) {
-            logger?.debug("No active tab found.");
-            return null;
+    async initialize() {
+        // retrieve stored values or return defaults
+        this._debugMode = (await this._get({debugMode: this._debugMode})).debugMode;
+        this._mutedTabs = (await this._get({mutedTabs: this._mutedTabs})).mutedTabs;
+        this._hiddenPlayers = (await this._get({hiddenPlayers: this._hiddenPlayers})).hiddenPlayers;
+        this.logger = new BackgroundLogger({debugMode: this._debugMode});
+        this.logger.debug("ExtensionState initialized with debug mode: ", this._debugMode);
+        this.initialized = true;
+    }
+
+    async _get(defaultValue) {
+        return await browser.storage.session.get(defaultValue);
+    }
+
+    async _set(value) {
+        await browser.storage.session.set(value);
+    }
+
+    isDebug() {
+        return this._debugMode;
+    }
+
+    isMuted(tabId) {
+        return this._mutedTabs.get(tabId) || false;
+    }
+
+    isHidden(tabId) {
+        return this._hiddenPlayers.get(tabId) || false;
+    }
+
+    async toggleDebugMode(tabId) {
+        const response = await browser.tabs.sendMessage(tabId, {task: 'toggleDebug'});
+        if (!response?.success) {
+            this.logger.error(`ExtensionState.togglePlayerHide() Failed to toggle DebugMode for tabId: ${tabId}`,  response?.error);
+            return false;
         }
-        return tabs[0];
+        this._debugMode = !this._debugMode;
+        await this._set({ debugMode: this._debugMode });
+        return true;
+    }
+
+    async togglePlayer(tabId) {
+        const currentMuteState = this._hiddenPlayers.get(tabId) || false;
+        // mute/unmute the tab where ads are started/stopped
+        const response = await browser.tabs.sendMessage(tabId, {task: 'togglePlayer'});
+        if (!response?.success) {
+            this.logger.error(`ExtensionState.togglePlayerHide() Failed to toggle Player Hide for tabId: ${tabId}`,  response?.error);
+            return false;
+        }
+        if (!currentMuteState) {
+            this._hiddenPlayers.set(tabId, true);
+        } else {
+            this._hiddenPlayers.delete(tabId);
+        }
+        await this._set({ hiddenPlayers: this._hiddenPlayers });
+        return true;
+    }
+
+    async toggleMute(tabId) {
+        const currentMuteState = this._mutedTabs.get(tabId) || false;
+        // mute/unmute the tab where ads are started/stopped
+        const response = await browser.tabs.update(tabId, {muted: !currentMuteState});
+        if (response.error) {
+            this.logger.error(`ExtensionState.togglePlayerHide() Failed to toggle Mute for tabId: ${tabId}`,  response?.error);
+            return false;
+        }
+        if (!currentMuteState) {
+            this._mutedTabs.set(tabId, true);
+        } else {
+            this._mutedTabs.delete(tabId);
+        }
+        await this._set({ mutedTabs: this._mutedTabs });
+        return true;
     }
 }
+
+class RequestWrapper {
+    AD_OPERATION_EVENT = 'RecordAdEvent';
+    requestType = 'invalid'; // default with invalid
+    constructor({method, requestBody, tabId}, {logger, state}) {
+        // Filter out non-POST requests
+        if (method !== "POST") {
+            return;
+        }
+        this.logger = logger || new BackgroundLogger({debugMode: state.debugMode});
+        if (!tabId) {
+            this.logger.debug("RequestWrapper() Tab ID is missing from the details object.");
+            return;
+        }
+        this.tabId = tabId;
+        this._processRequest(requestBody);
+    }
+
+    _processRequest( requestBody = {} ) {
+        const bytes = requestBody?.raw?.[0]?.bytes;
+
+        if (bytes) {
+            let decoder = new TextDecoder("utf-8");
+            let bodyString = decoder.decode(bytes);
+            if (bodyString) {
+                try {
+                    const jsonBody = JSON.parse(bodyString);
+                    this.requestType = this._processJson(jsonBody);
+                    this.logger.debug(`RequestWrapper._processRequest() Event Status [${this.requestType}]`);
+                } catch (error) {
+                    this.logger.error("Failed to parse JSON body:", error, requestBody);
+                }
+            } else {
+                this.logger.debug("RequestWrapper._processRequest() No JSON body found in request: ", requestBody);
+            }
+        }
+    }
+
+    /**
+     * This method parses the JSON requestBody to determine if the
+     * GraphQL payload contains metrics for starting video ads
+     * and for ending video ads.
+     * @param {string} json
+     * @returns {string}
+     */
+    _processJson(json = '') {
+        if (!Array.isArray(json) || json.length === 0) return 'invalid';
+        const { operationName, variables } = json[0] || {};
+        // Only process
+        if (!operationName || !operationName.includes(this.AD_OPERATION_EVENT)) {
+            return 'non-ad';
+        }
+        const { eventName } = variables?.input || {};
+        switch (eventName) {
+            case 'video_ad_impression':
+            case 'video_ad_quartile_complete':
+                return 'ad-started';
+            case 'video_ad_pod_complete':
+                return 'ad-completed';
+            case 'ad_impression':
+                return 'ad-rendered';
+            default:
+                return 'invalid';
+        }
+    }
+}
+
 
 /**
  * This is a simple Logger class that interfaces the browser's console logging
@@ -32,37 +155,8 @@ class TabUtils {
  * It also checks browser storage for a debugMode flag.
  */
 class BackgroundLogger {
-    constructor() {
-        browser.storage.local.get({ debugMode: false }, (result) => {
-            this.debugMode = !result.debugMode;
-        });
-    }
-
-    /**
-     * This method updates the local storage value for debugMode and forwards
-     * a message to the content-script to
-     * @param tabId
-     * @param success
-     */
-    toggleDebugMode(tabId, success) {
-        browser.storage.local.get({ debugMode: false }).then((result) => {
-            this.debugMode = !result.debugMode;
-            browser.storage.local.set({ debugMode: this.debugMode }).then(() => {
-                this.warn(`Debug Mode is now ${this.debugMode ? 'on' : 'off'}`);
-            });
-            // enable debug on the contentScript
-            this.debug(`BackgroundLogger.toggleDebugMode() Toggling Debug Mode on tabId: [${tabId}]`);
-            browser.tabs.sendMessage(tabId, {task: 'toggleDebug'}).then((response) => {
-                if (!response?.success) {
-                    this.error("BackgroundLogger.toggleDebugMode() Failed to toggle Debug Mode on content-script: ",  response?.error);
-                    success(false);
-                }
-            });
-            success(true);
-        }).catch((error) => {
-            this.error("BackgroundLogger.toggleDebugMode() Error toggling Debug Mode:", error);
-            success(false);
-        })
+    constructor({debugMode}) {
+        this._debugMode = debugMode;
     }
 
     /**
@@ -94,7 +188,7 @@ class BackgroundLogger {
     }
 
     logMessage(message, ...args) {
-        if (this.debugMode) {
+        if (this._debugMode) {
             if (Object.keys(args).length === 0) {
                 console.log(message);
             } else {
@@ -104,7 +198,7 @@ class BackgroundLogger {
     }
 
     debug(message, ...args) {
-        if (this.debugMode) {
+        if (this._debugMode) {
             if (Object.keys(args).length === 0) {
                 console.debug(message);
             } else {
@@ -131,157 +225,19 @@ class BackgroundLogger {
 }
 
 /**
- * This is a simple Messaging Class that handles and incoming messages from other parts
- * of the extension, such as the content scripts
- * Messages should be an object with the following format:
- * { "task": "log", "message": "Log message", "level": "debug":, ...otherArgs }
- */
-class BackgroundMessageHandler {
-    constructor(caller) {
-        this.caller = caller;
-        this.logger = new BackgroundLogger(this);
-        this._initialize();
-    }
-
-    _initialize() {
-        browser.runtime.onMessage.addListener((data, sender, sendResponse) => this.handleMessage(data, sender, sendResponse));
-    }
-
-    handleMessage(data, sender, sendResponse) {
-        const { task, tabId, ...params } = data;
-        if (typeof task === 'string') {
-            this.logger.debug(`BackgroundMessageHandler.onMessage() Received task: ${task} from sender:`, sender);
-            switch (task) {
-                case "log":
-                    this.logger.log(params);
-                    sendResponse(true);
-                    break;
-                case "toggleDebug":
-                    this.logger.toggleDebugMode(tabId, () => sendResponse(true));
-                    break;
-                case "toggleMute":
-                    this.caller.toggleMute(tabId, () => sendResponse(true));
-                    break;
-                case "togglePlayer":
-                    this.caller.togglePlayer(tabId, () => sendResponse(true));
-                    break;
-                default:
-                    this.logger.error(`Unknown task: ${task}`);
-                    sendResponse(false);
-            }
-        } else {
-            this.logger.error('BackgroundMessageHandler.onMessage() Error: task was provided as a non-string value');
-            sendResponse(false);
-        }
-    }
-}
-
-
-/**
  * This class handles the web request to Twitch's GQL API, and determines
  * if the request is for handling ad impressions, and toggling the tab mute,
  * and hide video features.
  * It's also the top-level class that is instantiated in the background script.
  */
-class TwitchtvAdMonitor {
-    AD_OPERATION_EVENT = 'RecordAdEvent';
+class AdMonitor {
+
     constructor() {
         // Map to track which tabs were muted by the extension
-        this.mutedTabs = new Map();
-        this.isHidden = false;
-        this.messenger = new BackgroundMessageHandler(this);
-        this.logger = this.messenger.logger;
-        this.playerManagerInitialized = true;
-        this.tabIdWithAd = null;
-
-        this.logger.logMessage("TwitchtvAdMonitor.constructor() initialized with debugMode:" , this.logger.debugMode);
-
-        // Initialize listeners
-        this._initializeListeners();
-    }
-
-    /**
-     * Initializes necessary listeners for the extension.
-     */
-    _initializeListeners() {
-        browser.webRequest.onBeforeRequest.addListener(
-            this.handleRequest.bind(this),
-            { urls: ["*://gql.twitch.tv/*"] },
-            ["requestBody"]
-        );
-    }
-
-    /**
-     * This method parses the JSON requestBody to determine if the
-     * GraphQL payload contains metrics for starting video ads
-     * and for ending video ads.
-     * @param {string} json
-     * @returns {string}
-     */
-    getAdStatus(json) {
-        if (!Array.isArray(json) || json.length === 0) return 'invalid';
-        const { operationName, variables } = json[0] || {};
-        // Only process
-        if (!operationName || !operationName.includes(this.AD_OPERATION_EVENT)) {
-            return 'non-ad';
-        }
-        const { eventName } = variables?.input || {};
-        switch (eventName) {
-            case 'video_ad_impression':
-            case 'video_ad_quartile_complete':
-                return 'ad-started';
-            case 'video_ad_pod_complete':
-                return 'ad-completed';
-            case 'ad_impression':
-                return 'ad-rendered';
-            default:
-                return 'invalid';
-        }
-    }
-
-    /**
-     * This function handles toggling the player for the currently active tab.
-     * @param tabId
-     * @param success callback that will be passed a single boolean argument indicating success/failure
-     */
-    togglePlayer(tabId, success) {
-        this.logger.debug("TwitchtvAdMonitor.togglePlayer() called");
-        if (!this.playerManagerInitialized) {
-            this.logger.warn('The player manager is not initialized yet. Please try again later.');
-            success(false);
-            return;
-        }
-        this.logger.debug(`TwitchtvAdMonitor.togglePlayer() Toggling Player on tabId: [${tabId}]`);
-        browser.tabs.sendMessage(tabId, {task: 'togglePlayer'}).then((response) => {
-            if (response?.success) {
-                this.isHidden = !this.isHidden;
-                success(true);
-            } else {
-                this.logger.error("TwitchtvAdMonitor.togglePlayer() Failed to toggle player: ",  response?.error);
-                success(false);
-            }
-        }).catch((error) => {
-            this.logger.error('TwitchtvAdMonitor.togglePlayer() Error toggling the player:', error);
-            success(false);
-        });
-    }
-
-    /**
-     * This function handles toggling mute for the currently active tab.
-     * @param tabId
-     * @param success callback that will be passed a single boolean argument indicating success/failure
-     */
-    toggleMute(tabId, success) {
-        this.logger.debug("TwitchtvAdMonitor.toggleMute() Toggling Mute");
-        const currentMuteState = this.mutedTabs.get(tabId) || false;
-        // mute/unmute the tab where ads are started/stopped
-        browser.tabs.update(tabId, {muted: !currentMuteState});
-        if (!currentMuteState) {
-            this.mutedTabs.set(tabId, true);
-        } else {
-            this.mutedTabs.delete(tabId);
-        }
-        success(true);
+        this.state = new ExtensionState();
+        this.state.initialize().then(()=>{
+            this.logger = new BackgroundLogger({debugMode: this.state.isDebug()});
+        })
     }
 
     /**
@@ -291,46 +247,59 @@ class TwitchtvAdMonitor {
      */
     handleAdStatus(adStatus, tabId) {
         // only mute/hide if not already muted || if it was muted by the add-on
-        if ((adStatus === 'ad-started' && !this.mutedTabs.has(tabId)) || (adStatus === 'ad-completed' && this.mutedTabs.has(tabId))) {
+        if (this.state.initialized && ((adStatus === 'ad-started' && !this.state.isMuted(tabId)) || (adStatus === 'ad-completed' && this.state.isMuted(tabId)))) {
             // empty callbacks, since this block isn't driven by message handler
-            this.toggleMute(tabId,()=>{});
-            this.togglePlayer(tabId,()=>{});
+            this.state.toggleMute(tabId).then();
+            this.state.togglePlayer(tabId).then();
         }
     }
 
     // Request Listener
     handleRequest(details) {
-        // Filter out non-POST requests
-        if (details.method !== "POST") {
-            return;
-        }
-        const bytes = details.requestBody?.raw?.[0]?.bytes;
+        const { requestType, tabId } = new RequestWrapper(details);
+        this.handleAdStatus(requestType, tabId);
+    }
 
-        if (bytes) {
-            let decoder = new TextDecoder("utf-8");
-            let bodyString = decoder.decode(bytes);
-            if (bodyString) {
-                try {
-                    const jsonBody = JSON.parse(bodyString);
-                    const adStatus = this.getAdStatus(jsonBody);
-                    this.logger.debug(`TwitchtvAdMonitor.handleRequest() Event Status [${adStatus}]`);
-                    const { tabId } = details || {};
-                    if (tabId) {
-                        this.tabIdWithAd = tabId;
-                        this.handleAdStatus(adStatus, tabId);
-                    } else {
-                        this.logger.warn("Tab ID is missing from the details object:", details);
-                    }
-                } catch (error) {
-                    this.logger.error("Failed to parse JSON body:", error, details);
-                }
-            } else {
-                this.logger.warn("No JSON body found in request: ", details);
+    handleMessage(data, sender, sendResponse) {
+        const { task, tabId, ...params } = data;
+        if (typeof task === 'string') {
+            this.logger.debug(`AdMonitor.onMessage() Received task: ${task} for tabId: [${tabId}] from sender:`, sender);
+            switch (task) {
+                case "log":
+                    this.logger.log(params);
+                    sendResponse(true);
+                    break;
+                case "toggleDebug":
+                    this.state.toggleDebugMode(tabId).then((success) => sendResponse(success));
+                    break;
+                case "toggleMute":
+                    this.state.toggleMute(tabId).then((success) => sendResponse(success));
+                    break;
+                case "togglePlayer":
+                    this.state.togglePlayer(tabId).then((success) => sendResponse(success));
+                    break;
+                default:
+                    this.logger.error(`Unknown task: ${task}`);
+                    sendResponse(false);
             }
+        } else {
+            this.logger.error('AdMonitor.onMessage() Error: task was provided as a non-string value');
+            sendResponse(false);
         }
     }
 
 }
 
 // instantiate the main class for the background script.
-new TwitchtvAdMonitor();
+const adMonitor = new AdMonitor();
+
+browser.webRequest.onBeforeRequest.addListener(
+    adMonitor.handleRequest.bind(adMonitor),
+    { urls: ["*://gql.twitch.tv/*"] },
+    ["requestBody"]
+);
+
+browser.runtime.onMessage.addListener(
+    adMonitor.handleMessage.bind(adMonitor),
+);
+
