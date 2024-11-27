@@ -12,7 +12,7 @@ class ExtensionState {
         this._mutedTabs = (await this._get({mutedTabs: this._mutedTabs})).mutedTabs;
         this._hiddenPlayers = (await this._get({hiddenPlayers: this._hiddenPlayers})).hiddenPlayers;
         this.logger = new BackgroundLogger({debugMode: this._debugMode});
-        this.logger.debug("ExtensionState initialized with debug mode: ", this._debugMode);
+        console.debug("ExtensionState initialized with debug mode: ", this._debugMode);
         this.initialized = true;
     }
 
@@ -37,17 +37,20 @@ class ExtensionState {
     }
 
     async toggleDebugMode(tabId) {
+        console.debug(`ExtensionState.toggleDebugMode(${tabId})`);
         const response = await browser.tabs.sendMessage(tabId, {task: 'toggleDebug'});
+        console.debug(`ExtensionState.toggleDebugMode(${tabId}): response: `, response);
         if (!response?.success) {
             this.logger.error(`ExtensionState.togglePlayerHide() Failed to toggle DebugMode for tabId: ${tabId}`,  response?.error);
             return false;
         }
         this._debugMode = !this._debugMode;
-        await this._set({ debugMode: this._debugMode });
+        await this._set({ debugMode: this._debugMode }).catch((error) => console.error("Error saving debugMode state:", error));
         return true;
     }
 
     async togglePlayer(tabId) {
+        console.debug(`ExtensionState.togglePlayer(${tabId})`);
         const currentMuteState = this._hiddenPlayers.get(tabId) || false;
         // mute/unmute the tab where ads are started/stopped
         const response = await browser.tabs.sendMessage(tabId, {task: 'togglePlayer'});
@@ -60,11 +63,12 @@ class ExtensionState {
         } else {
             this._hiddenPlayers.delete(tabId);
         }
-        await this._set({ hiddenPlayers: this._hiddenPlayers });
+        await this._set({ hiddenPlayers: this._hiddenPlayers }).catch((error) => console.error("Error saving hiddenPlayers state:", error));
         return true;
     }
 
     async toggleMute(tabId) {
+        console.debug(`ExtensionState.toggleMute(${tabId})`);
         const currentMuteState = this._mutedTabs.get(tabId) || false;
         // mute/unmute the tab where ads are started/stopped
         const response = await browser.tabs.update(tabId, {muted: !currentMuteState});
@@ -77,7 +81,7 @@ class ExtensionState {
         } else {
             this._mutedTabs.delete(tabId);
         }
-        await this._set({ mutedTabs: this._mutedTabs });
+        await this._set({ mutedTabs: this._mutedTabs }).catch((error) => console.error("Error saving mutedTabs state:", error));
         return true;
     }
 }
@@ -92,11 +96,12 @@ class RequestWrapper {
         }
         this.logger = logger || new BackgroundLogger({debugMode: state.debugMode});
         if (!tabId) {
-            this.logger.debug("RequestWrapper() Tab ID is missing from the details object.");
+            console.debug("RequestWrapper() Tab ID is missing from the details object.");
             return;
         }
         this.tabId = tabId;
         this._processRequest(requestBody);
+        console.debug(`RequestWrapper() processed request with requestType: ${this.requestType}`);
     }
 
     _processRequest( requestBody = {} ) {
@@ -109,12 +114,12 @@ class RequestWrapper {
                 try {
                     const jsonBody = JSON.parse(bodyString);
                     this.requestType = this._processJson(jsonBody);
-                    this.logger.debug(`RequestWrapper._processRequest() Event Status [${this.requestType}]`);
+                    console.debug(`RequestWrapper._processRequest() Event Status [${this.requestType}]`);
                 } catch (error) {
                     this.logger.error("Failed to parse JSON body:", error, requestBody);
                 }
             } else {
-                this.logger.debug("RequestWrapper._processRequest() No JSON body found in request: ", requestBody);
+                console.debug("RequestWrapper._processRequest() No JSON body found in request: ", requestBody);
             }
         }
     }
@@ -246,6 +251,7 @@ class AdMonitor {
      * @param {number} tabId
      */
     handleAdStatus(adStatus, tabId) {
+        console.debug("AdMonitor.handleAdStatus()");
         // only mute/hide if not already muted || if it was muted by the add-on
         if (this.state.initialized && ((adStatus === 'ad-started' && !this.state.isMuted(tabId)) || (adStatus === 'ad-completed' && this.state.isMuted(tabId)))) {
             // empty callbacks, since this block isn't driven by message handler
@@ -256,27 +262,38 @@ class AdMonitor {
 
     // Request Listener
     handleRequest(details) {
-        const { requestType, tabId } = new RequestWrapper(details);
+        console.debug("AdMonitor.handleRequest()");
+        const { requestType, tabId } = new RequestWrapper(details, this);
         this.handleAdStatus(requestType, tabId);
     }
 
     handleMessage(data, sender, sendResponse) {
+        console.debug("AdMonitor.handleMessage()");
         const { task, tabId, ...params } = data;
         if (typeof task === 'string') {
-            this.logger.debug(`AdMonitor.onMessage() Received task: ${task} for tabId: [${tabId}] from sender:`, sender);
+            console.debug(`AdMonitor.onMessage() Received task: ${task} for tabId: [${tabId}] from sender:`, sender);
             switch (task) {
                 case "log":
                     this.logger.log(params);
                     sendResponse(true);
                     break;
                 case "toggleDebug":
-                    this.state.toggleDebugMode(tabId).then((success) => sendResponse(success));
+                    this.state.toggleDebugMode(tabId).then((success) => {
+                        console.debug(`AdMonitor.onMessage() toggleDebugMode success:`, success);
+                        sendResponse(success);
+                    });
                     break;
                 case "toggleMute":
-                    this.state.toggleMute(tabId).then((success) => sendResponse(success));
+                    this.state.toggleMute(tabId).then((success) => {
+                        console.debug(`AdMonitor.onMessage() toggleMute success:`, success);
+                        sendResponse(success);
+                    });
                     break;
                 case "togglePlayer":
-                    this.state.togglePlayer(tabId).then((success) => sendResponse(success));
+                    this.state.togglePlayer(tabId).then((success) => {
+                        console.debug(`AdMonitor.onMessage() togglePlayer success:`, success);
+                        sendResponse(success);
+                    });
                     break;
                 default:
                     this.logger.error(`Unknown task: ${task}`);
@@ -286,6 +303,7 @@ class AdMonitor {
             this.logger.error('AdMonitor.onMessage() Error: task was provided as a non-string value');
             sendResponse(false);
         }
+        return true; // enables async handling?
     }
 
 }

@@ -1,12 +1,10 @@
 class PopupMonitor {
     constructor() {
         this._initialize();
+        console.debug("PopupMonitor initialized");
     }
 
     _initialize() {
-        browser.storage.local.get({ debugMode: false }).then((result) => {
-            this.debugMode = result.debugMode;
-        });
         document.getElementById('toggleDebug').addEventListener('click', () => this.toggleDebug());
         document.getElementById('toggleMute').addEventListener('click', () => this.toggleMute());
         document.getElementById('togglePlayer').addEventListener('click', () => this.togglePlayer());
@@ -16,8 +14,10 @@ class PopupMonitor {
         const tab = await this.getActiveTab();
         if (tab) {
             // Send message to the first active tab
+            console.debug(`Found Active Tab: ${tab.id}`);
             return tab.id;
         }
+        console.debug(`No active Tab found`);
         return null;
     }
 
@@ -33,10 +33,9 @@ class PopupMonitor {
     toggleDebug() {
         this.getActiveTabId().then((tabId) =>{
             this._backgroundMessage({task: 'toggleDebug', tabId}, (success) => {
-                if (success) {
-                    // update local debugMode
-                    this.debugMode = !this.debugMode;
-                    alert(`Debug mode is now ${this.debugMode ? 'on' : 'off'}`);
+                console.debug("PopupMonitor.toggleDebug(), success?: ", success);
+                if (!success) {
+                    console.error(`Error while toggling debug mode`);
                 }
             });
         }).catch((error)=>{
@@ -64,7 +63,7 @@ class PopupMonitor {
         browser.runtime.sendMessage(params).then((success) => {
             if (callback) {
                 callback(success);
-            } else if (this.debugMode) {
+            } else {
                 console.debug("PopupMonitor._backgroundMessage() message was received: ", success);
             }
         }).catch((error) => {
