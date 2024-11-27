@@ -1,4 +1,4 @@
-class PopupHandler {
+class PopupMonitor {
     constructor() {
         this._initialize();
     }
@@ -12,9 +12,26 @@ class PopupHandler {
         document.getElementById('togglePlayer').addEventListener('click', () => this.togglePlayer());
     }
 
-    toggleDebug() {
+    async getActiveTabId() {
+        const tab = await this.getActiveTab();
+        if (tab) {
+            // Send message to the first active tab
+            return tab.id;
+        }
+        return null;
+    }
 
-        TabUtils.getActiveTabId({logger: ()=>{}}).then((tabId) =>{
+    async getActiveTab(){
+        const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+        if (tabs.length === 0) {
+            return null;
+        }
+        return tabs[0];
+    }
+
+
+    toggleDebug() {
+        this.getActiveTabId().then((tabId) =>{
             this._backgroundMessage({task: 'toggleDebug', tabId}, (success) => {
                 if (success) {
                     // update local debugMode
@@ -23,23 +40,23 @@ class PopupHandler {
                 }
             });
         }).catch((error)=>{
-            console.error('PopupHandler.toggleMute() Error toggling mute:', error);
+            console.error('PopupMonitor.toggleMute() Error toggling mute:', error);
         });
     }
 
     toggleMute() {
-        TabUtils.getActiveTabId({logger: ()=>{}}).then((tabId) =>{
+        this.getActiveTabId().then((tabId) =>{
             this._backgroundMessage({task: 'toggleMute', tabId});
         }).catch((error)=>{
-            console.error('PopupHandler.toggleMute() Error toggling mute:', error);
+            console.error('PopupMonitor.toggleMute() Error toggling mute:', error);
         });
     }
 
     togglePlayer() {
-        TabUtils.getActiveTabId({logger: ()=>{}}).then((tabId) =>{
+        this.getActiveTabId().then((tabId) =>{
             this._backgroundMessage({task: 'togglePlayer', tabId});
         }).catch((error)=>{
-            console.error('PopupHandler.togglePlayer() Error toggling player:', error);
+            console.error('PopupMonitor.togglePlayer() Error toggling player:', error);
         });
     }
 
@@ -48,12 +65,12 @@ class PopupHandler {
             if (callback) {
                 callback(success);
             } else if (this.debugMode) {
-                console.debug("PopupHandler._backgroundMessage() message was received: ", success);
+                console.debug("PopupMonitor._backgroundMessage() message was received: ", success);
             }
         }).catch((error) => {
-            console.error('PopupHandler._backgroundMessage() Error sending message to background:', error);
+            console.error('PopupMonitor._backgroundMessage() Error sending message to background:', error);
         });
     }
 }
 
-new PopupHandler();
+new PopupMonitor();
