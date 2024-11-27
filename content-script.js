@@ -1,3 +1,4 @@
+console.debug('Content Script Loaded');
 /**
  * This class handles the Video Player on the Twitch Tab.
  * It listens for events from the background.js that indicate
@@ -8,6 +9,7 @@ class PlayerMonitor {
         this.player = null; // Cached player element
         this.isHidden = false;
         this.debugMode = debugMode;
+        console.debug('PlayerMonitor initialized');
     }
 
     /**
@@ -95,7 +97,7 @@ class PlayerMonitor {
 }
 
 // Instantiate the content script class
-const popup = new PlayerMonitor({debugMode: false});
+const popup = new PlayerMonitor({debugMode: true});
 
 browser.runtime.onMessage.addListener(popup.handleMessage.bind(popup));
 
