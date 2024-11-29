@@ -1,24 +1,24 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" id="ttv-ad-mute-popup-panel">
 <head>
-    <title>Twitch.tv Ad Mute</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            padding: 10px;
-        }
-        button {
-            margin-top: 10px;
-        }
-    </style>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TTV Ad Mute</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="shortcut icon" type="image/svg+xml" href="img/icon.svg">
 </head>
-<body>
-<h1>Twitch.tv Ad Mute</h1>
-<p>Hide ads on Twitch and display an 'Ads Playing' notice.</p>
-<button id="toggleDebug">Toggle Debug Mode</button>
-<button id="toggleMute">Toggle Tab Mute</button>
-<button id="togglePlayer">Toggle Video Player</button>
-
-<script src="popup.js"></script>
+<body class="theme-dark">
+<header>
+    <h1>Twitch.tv Ad Mute</h1>
+</header>
+<main>
+    <p>This menu is mainly for debugging purposes and troubleshooting.  If you have any issues, try reloading the webpage or enabling the domain permission for the plugin within plugin management.</p>
+        <div class="button-container" role="group" aria-label="Control buttons">
+        <button id="toggleDebug" aria-label="Toggle Debug Mode">Toggle Debug Mode</button>
+        <button id="toggleMute" aria-label="Toggle Tab Mute">Toggle Tab Mute</button>
+        <button id="togglePlayer" aria-label="Toggle Video Player">Toggle Video Player</button>
+    </div>
+</main>
+<script src="js/popup.js"></script>
 </body>
 </html>

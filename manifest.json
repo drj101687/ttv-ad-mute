@@ -20,23 +20,23 @@
       "matches": [
         "*://*.twitch.tv/*"
       ],
-      "js": ["content-script.js"]
+      "js": ["js/content-script.js"]
     }
   ],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": ["js/background.js"]
   },
   "icons": {
-    "24": "icon.svg",
-    "48": "icon.svg",
-    "96": "icon.svg"
+    "24": "img/icon.svg",
+    "48": "img/icon.svg",
+    "96": "img/icon.svg"
   },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icon.svg",
-      "48": "icon.svg",
-      "128": "icon.svg"
+      "16": "img/icon.svg",
+      "48": "img/icon.svg",
+      "128": "img/icon.svg"
     }
   },
   "browser_specific_settings": {

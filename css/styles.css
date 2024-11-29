@@ -1,0 +1,65 @@
+.theme-dark {
+  --ttv-theme-dark-bg-color: rgb(24, 24, 27);
+  --ttv-theme-dark-button-bg-color: rgb(145, 71, 255);
+  --ttv-theme-dark-button-bg-color-hover: rgb(119, 44, 232);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: Arial, sans-serif;
+  font-weight: 600;
+  margin: 0;
+  padding: 20px;
+  background-color: rgb(24, 24, 27);
+}
+
+h1 {
+  color: #eee;
+}
+p {
+  color: #fff;
+  text-align: justify;
+  max-width: 400px;
+}
+.button-container {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+button {
+  padding: 10px 20px;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #fff;
+  background-color: var(--ttv-theme-dark-button-bg-color);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+button:hover {
+  background-color: var(--ttv-theme-dark-button-bg-color-hover);
+}
+
+/* Internal CSS values */
+:root body {
+  overflow: hidden;
+}
+:root body,
+:root.mobile body {
+  --font-size: 14px;
+  --popup-gap: var(--font-size);
+  --popup-gap-thin: calc(0.5 * var(--popup-gap));
+  --popup-gap-extra-thin: calc(0.25 * var(--popup-gap));
+  --popup-main-min-width: 18em;
+  --popup-firewall-min-width: 30em;
+  --popup-rule-cell-width: 5em;
+  font-size: var(--font-size);
+  line-height: 20px;
+}
+:root body.loading {
+  opacity: 0;
+}
