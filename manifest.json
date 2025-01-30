@@ -24,7 +24,8 @@
     }
   ],
   "background": {
-    "service_worker": "js/background.js"
+    "service_worker": "js/background.js",
+    "scripts": ["js/background.js"]
   },
   "icons": {
     "24": "img/icon.svg",
@@ -42,7 +43,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "{45d2bb29-5d79-4000-8de0-c203f8e05c83}",
-      "strict_min_version": "115.0"
+      "strict_min_version": "121.0"
     }
   }
 }
