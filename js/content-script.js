@@ -17,7 +17,7 @@ class PlayerMonitor {
      * @returns {HTMLElement|null} - The video element if found, otherwise null.
      */
     getPlayer() {
-        return document.querySelector(".video-ref.Layout-sc-1xcs6mc-0 > video");
+        return document.querySelector(".video-render-surface > video");
     }
 
     /**
