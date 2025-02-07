@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Twitch.tv Ad Mute",
-  "version": "1.6",
+  "name": "TTV Ad Mute",
+  "version": "1.7",
   "description": "Automatically mutes Twitch tabs when video ads start playing and unmutes the tab when the video ads stop.",
   "author": "Darrin Johnson",
   "homepage_url": "https://github.com/drj101687/ttv-ad-mute",
@@ -20,29 +20,30 @@
       "matches": [
         "*://*.twitch.tv/*"
       ],
-      "js": ["content-script.js"]
+      "js": ["js/content-script.js"]
     }
   ],
   "background": {
-    "scripts": ["background.js"]
+    "service_worker": "js/background.js",
+    "scripts": ["js/background.js"]
   },
   "icons": {
-    "24": "icon.svg",
-    "48": "icon.svg",
-    "96": "icon.svg"
+    "24": "img/icon.svg",
+    "48": "img/icon.svg",
+    "96": "img/icon.svg"
   },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icon.svg",
-      "48": "icon.svg",
-      "128": "icon.svg"
+      "16": "img/icon.svg",
+      "48": "img/icon.svg",
+      "128": "img/icon.svg"
     }
   },
   "browser_specific_settings": {
     "gecko": {
       "id": "{45d2bb29-5d79-4000-8de0-c203f8e05c83}",
-      "strict_min_version": "115.0"
+      "strict_min_version": "121.0"
     }
   }
 }
