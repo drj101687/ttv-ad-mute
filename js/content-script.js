@@ -17,7 +17,11 @@ class PlayerMonitor {
      * @returns {HTMLElement|null} - The video element if found, otherwise null.
      */
     getPlayer() {
-        return document.querySelector(".video-render-surface > video");
+        return document.querySelector("div[data-a-target=\"video-ref\"] > video");
+    }
+
+    getAllPlayers() {
+        return document.querySelectorAll("video");
     }
 
     /**
@@ -29,7 +33,7 @@ class PlayerMonitor {
 
         try {
             // ensure fresh player is acquired every time we toggle for ads
-            this.player = this.getPlayer();
+            this.player = this.getPlayer() ?? this.getAllPlayers()[0];
             if (this.debugMode) {
                 console.debug(`PlayerMonitor.togglePlayer() hide: ${hide}, player:`, this.player);
             }
