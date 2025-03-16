@@ -5,7 +5,7 @@ const timeInSeconds = () => {
 class ExtensionState {
     initialized = false;
     constructor() {
-        this._debugMode = true;
+        this._debugMode = false;
         this._mutedTabs = new Map();
         this._hiddenPlayers = new Map();
         this._playingAds = new Map();
@@ -323,7 +323,6 @@ class AdMonitor {
         this.logger.debug(`AdMonitor.handleAdStatus(adStatus: ${adStatus}, tabId: ${tabId})`);
         // only mute/hide if not already muted || if it was muted by the add-on
         if (this.state.initialized) {
-
             if (adStatus.includes('ad-started')) {
                 this.handleAdStart(tabId);
             } else if (adStatus.includes('ad-completed')) {
