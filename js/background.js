@@ -1,9 +1,15 @@
+const timeInSeconds = () => {
+    return Math.floor(Date.now() / 1000);
+}
+
 class ExtensionState {
     initialized = false;
     constructor() {
         this._debugMode = true;
         this._mutedTabs = new Map();
         this._hiddenPlayers = new Map();
+        this._playingAds = new Map();
+        this._startTime = new Map();
     }
 
     async initialize() {
@@ -11,6 +17,8 @@ class ExtensionState {
         this._debugMode = (await this._get({debugMode: this._debugMode})).debugMode;
         this._mutedTabs = (await this._get({mutedTabs: this._mutedTabs})).mutedTabs;
         this._hiddenPlayers = (await this._get({hiddenPlayers: this._hiddenPlayers})).hiddenPlayers;
+        this._playingAds = (await this._get({playingAds: this._playingAds})).playingAds;
+        this._startTime = (await this._get({startTime: this._startTime})).startTime;
         this.logger = new BackgroundLogger({debugMode: this._debugMode});
         console.debug("ExtensionState initialized with debug mode: ", this._debugMode);
         this.initialized = true;
@@ -34,6 +42,31 @@ class ExtensionState {
 
     isHidden(tabId) {
         return this._hiddenPlayers.get(tabId) || false;
+    }
+
+    isPlayingAds(tabId) {
+        return this._playingAds.get(tabId) || false;
+    }
+
+    getStartTime(tabId) {
+        return this._startTime.get(tabId) || null;
+    }
+
+    async tabAdsStarted(tabId) {
+        const start = timeInSeconds();
+        this._startTime.set(tabId, start);
+        await this._set({ startTime: this._startTime });
+        this._playingAds.set(tabId, true);
+        await this._set({ playingAds: this._playingAds });
+        return true;
+    }
+
+    async tabAdsStopped(tabId) {
+        this._startTime.delete(tabId);
+        await this._set({ startTime: this._startTime});
+        this._playingAds.delete(tabId);
+        await this._set({ playingAds: this._playingAds });
+        return true;
     }
 
     async toggleDebugMode(tabId) {
@@ -88,7 +121,7 @@ class ExtensionState {
 
 class RequestWrapper {
     AD_OPERATION_EVENT = 'RecordAdEvent';
-    requestType = 'invalid'; // default with invalid
+    requestTypes = [];
     constructor({method, requestBody, tabId}, {logger, state}) {
         // Filter out non-POST requests
         if (method !== "POST") {
@@ -101,7 +134,6 @@ class RequestWrapper {
         }
         this.tabId = tabId;
         this._processRequest(requestBody);
-        console.debug(`RequestWrapper() processed request with requestType: ${this.requestType}`);
     }
 
     _processRequest( requestBody = {} ) {
@@ -113,8 +145,8 @@ class RequestWrapper {
             if (bodyString) {
                 try {
                     const jsonBody = JSON.parse(bodyString);
-                    this.requestType = this._processJson(jsonBody);
-                    console.debug(`RequestWrapper._processRequest() Event Status [${this.requestType}]`);
+                    this._processJson(jsonBody);
+                    console.debug(`RequestWrapper._processRequest() Event Status [${this.requestTypes}]`, jsonBody);
                 } catch (error) {
                     this.logger.error("Failed to parse JSON body:", error, requestBody);
                 }
@@ -133,23 +165,29 @@ class RequestWrapper {
      */
     _processJson(json = '') {
         if (!Array.isArray(json) || json.length === 0) return 'invalid';
-        const { operationName, variables } = json[0] || {};
-        // Only process
-        if (!operationName || !operationName.includes(this.AD_OPERATION_EVENT)) {
-            return 'non-ad';
-        }
-        const { eventName } = variables?.input || {};
-        switch (eventName) {
-            case 'video_ad_impression':
-            case 'video_ad_quartile_complete':
-                return 'ad-started';
-            case 'video_ad_pod_complete':
-                return 'ad-completed';
-            case 'ad_impression':
-                return 'ad-rendered';
-            default:
-                return 'invalid';
-        }
+        json.forEach( event => {
+            const { operationName, variables } = event || {};
+            // Only process
+            if (!operationName || !operationName.includes(this.AD_OPERATION_EVENT)) {
+                this.requestTypes.push('non-ad');
+                return; // continue forEach looping
+            }
+            const { eventName } = variables?.input || {};
+            switch (eventName) {
+                case 'video_ad_impression':
+                case 'video_ad_quartile_complete':
+                    this.requestTypes.push('ad-started');
+                    break;
+                case 'video_ad_pod_complete':
+                    this.requestTypes.push('ad-completed');
+                    break;
+                case 'ad_impression':
+                    this.requestTypes.push('ad-rendered');
+                    break;
+                default:
+                    this.requestTypes.push('invalid');
+            }
+        });
     }
 }
 
@@ -237,41 +275,99 @@ class BackgroundLogger {
  */
 class AdMonitor {
 
+    STATE_TIMEOUT_LIMIT;
+
     constructor() {
         // Map to track which tabs were muted by the extension
+        this.STATE_TIMEOUT_LIMIT = 60;
         this.state = new ExtensionState();
         this.state.initialize().then(()=>{
             this.logger = new BackgroundLogger({debugMode: this.state.isDebug()});
-        })
+        });
+    }
+
+    handleAdStart(tabId) {
+        this.logger.debug(`handleAdStart(tabId: ${tabId})`);
+        // always update
+        this.state.tabAdsStarted(tabId).then();
+
+        if (!this.state.isMuted(tabId)) {
+            this.state.toggleMute(tabId).then();
+        }
+
+        if (!this.state.isHidden(tabId)) {
+            this.state.togglePlayer(tabId).then();
+        }
+    }
+
+    handleAdStop(tabId) {
+        this.logger.debug(`handleAdStop(tabId: ${tabId})`);
+        if (this.state.isMuted(tabId)) {
+            this.state.toggleMute(tabId).then();
+        }
+
+        if (this.state.isHidden(tabId)) {
+            this.state.togglePlayer(tabId).then();
+        }
+
+        // always update
+        this.state.tabAdsStopped(tabId).then();
     }
 
     /**
      * Makes Browser and Content adjustments according to the adStatus
-     * @param {string} adStatus
+     * @param {string[]} adStatus
      * @param {number} tabId
      */
     handleAdStatus(adStatus, tabId) {
-        console.debug("AdMonitor.handleAdStatus()");
+        this.logger.debug(`AdMonitor.handleAdStatus(adStatus: ${adStatus}, tabId: ${tabId})`);
         // only mute/hide if not already muted || if it was muted by the add-on
-        if (this.state.initialized && ((adStatus === 'ad-started' && !this.state.isMuted(tabId)) || (adStatus === 'ad-completed' && this.state.isMuted(tabId)))) {
-            // empty callbacks, since this block isn't driven by message handler
-            this.state.toggleMute(tabId).then();
-            this.state.togglePlayer(tabId).then();
+        if (this.state.initialized) {
+
+            if (adStatus.includes('ad-started')) {
+                this.handleAdStart(tabId);
+            } else if (adStatus.includes('ad-completed')) {
+                this.handleAdStop(tabId);
+            } else {
+                // non-ad status, handle edge case that we may be out of sync
+                if (this.state.isPlayingAds(tabId)) {
+                    let start = this.state.getStartTime(tabId);
+                    if (!start) {
+                        // bad state, ads were tracked as playing, but no start time found
+                        this.handleAdStop(tabId);
+                        this.logger.debug(`AdMonitor entered a bad state while tracking Ads. Resuming Normal Playing behavior on tabId: [${tabId}].`);
+                    } else {
+                        const current = timeInSeconds();
+                        const timeDiff = current - start;
+                        if (timeDiff > this.STATE_TIMEOUT_LIMIT) {
+                            // last ad event started over STATE_TIMEOUT_LIMIT seconds ago.
+                            this.handleAdStop(tabId);
+                            this.logger.debug(`Tracked Ad lifecycle exceeded time limit. Resuming Normal Playing behavior on tabId: [${tabId}].`);
+                        }
+                    }
+                }
+            }
+        } else {
+            this.logger.debug("AdMinotor not handling Ad, ExtentionState not initialized");
         }
     }
 
     // Request Listener
     handleRequest(details) {
-        console.debug("AdMonitor.handleRequest()");
-        const { requestType, tabId } = new RequestWrapper(details, this);
-        this.handleAdStatus(requestType, tabId);
+        this.logger.debug("AdMonitor.handleRequest()", details);
+        const { requestTypes, tabId } = new RequestWrapper(details, this);
+        if (requestTypes && tabId) {
+            this.handleAdStatus(requestTypes, tabId);
+        } else {
+            this.logger.debug("AdMonitor not handling request, no tabId or requestTypes detected.");
+        }
     }
 
     handleMessage(data, sender, sendResponse) {
-        console.debug("AdMonitor.handleMessage()");
         const { task, tabId, ...params } = data;
+        this.logger.debug("AdMonitor.handleMessage()", task, tabId);
         if (typeof task === 'string') {
-            console.debug(`AdMonitor.onMessage() Received task: ${task} for tabId: [${tabId}] from sender:`, sender);
+            this.logger.debug(`AdMonitor.onMessage() Received task: ${task} for tabId: [${tabId}] from sender:`, sender);
             switch (task) {
                 case "log":
                     this.logger.log(params);
@@ -279,19 +375,19 @@ class AdMonitor {
                     break;
                 case "toggleDebug":
                     this.state.toggleDebugMode(tabId).then((success) => {
-                        console.debug(`AdMonitor.onMessage() toggleDebugMode success:`, success);
+                        this.logger.debug(`AdMonitor.onMessage() toggleDebugMode success:`, success);
                         sendResponse(success);
                     });
                     break;
                 case "toggleMute":
                     this.state.toggleMute(tabId).then((success) => {
-                        console.debug(`AdMonitor.onMessage() toggleMute success:`, success);
+                        this.logger.debug(`AdMonitor.onMessage() toggleMute success:`, success);
                         sendResponse(success);
                     });
                     break;
                 case "togglePlayer":
                     this.state.togglePlayer(tabId).then((success) => {
-                        console.debug(`AdMonitor.onMessage() togglePlayer success:`, success);
+                        this.logger.debug(`AdMonitor.onMessage() togglePlayer success:`, success);
                         sendResponse(success);
                     });
                     break;
