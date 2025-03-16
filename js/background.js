@@ -323,10 +323,11 @@ class AdMonitor {
         this.logger.debug(`AdMonitor.handleAdStatus(adStatus: ${adStatus}, tabId: ${tabId})`);
         // only mute/hide if not already muted || if it was muted by the add-on
         if (this.state.initialized) {
-            if (adStatus.includes('ad-started')) {
-                this.handleAdStart(tabId);
-            } else if (adStatus.includes('ad-completed')) {
+            // Check for completion first, in case start and completed events are captured in the same request.
+            if (adStatus.includes('ad-completed')) {
                 this.handleAdStop(tabId);
+            } else if (adStatus.includes('ad-started')) {
+                this.handleAdStart(tabId);
             } else {
                 // non-ad status, handle edge case that we may be out of sync
                 if (this.state.isPlayingAds(tabId)) {
