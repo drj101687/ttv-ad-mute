@@ -2,8 +2,16 @@ const timeInSeconds = () => {
     return Math.floor(Date.now() / 1000);
 }
 
+/**
+ * This class manages the state of the extension, including debug mode,
+ * muted tabs, hidden players, playing ads, and start times.
+ */
 class ExtensionState {
+    /**
+     * A Boolean indicating that the Extension has been initialized.
+     */
     initialized = false;
+
     constructor() {
         this._debugMode = false;
         this._mutedTabs = new Map();
@@ -12,6 +20,10 @@ class ExtensionState {
         this._startTime = new Map();
     }
 
+    /**
+     * Initializes the extension state by retrieving stored values or using defaults.
+     * @returns {Promise<void>}
+     */
     async initialize() {
         // retrieve stored values or return defaults
         this._debugMode = (await this._get({debugMode: this._debugMode})).debugMode;
@@ -24,34 +36,73 @@ class ExtensionState {
         this.initialized = true;
     }
 
+    /**
+     * Retrieves a value from session storage with a default if not found.
+     * @param {Object} defaultValue - The default value to return if not found in storage.
+     * @returns {Promise<Object>}
+     */
     async _get(defaultValue) {
         return await browser.storage.session.get(defaultValue);
     }
 
+    /**
+     * Sets a value in session storage.
+     * @param {Object} value - The value to set in storage.
+     * @returns {Promise<void>}
+     */
     async _set(value) {
         await browser.storage.session.set(value);
     }
 
+    /**
+     * Checks if debug mode is enabled.
+     * @returns {boolean}
+     */
     isDebug() {
         return this._debugMode;
     }
 
+    /**
+     * Checks if a tab is muted.
+     * @param {number} tabId - The ID of the tab to check.
+     * @returns {boolean}
+     */
     isMuted(tabId) {
         return this._mutedTabs.get(tabId) || false;
     }
 
+    /**
+     * Checks if a player in a tab is hidden.
+     * @param {number} tabId - The ID of the tab to check.
+     * @returns {boolean}
+     */
     isHidden(tabId) {
         return this._hiddenPlayers.get(tabId) || false;
     }
 
+    /**
+     * Checks if ads are playing in a tab and have been detected.
+     * @param {number} tabId - The ID of the tab to check.
+     * @returns {boolean}
+     */
     isPlayingAds(tabId) {
         return this._playingAds.get(tabId) || false;
     }
 
+    /**
+     * Gets the start time for ads in a tab.
+     * @param {number} tabId - The ID of the tab to check.
+     * @returns {number|null}
+     */
     getStartTime(tabId) {
         return this._startTime.get(tabId) || null;
     }
 
+    /**
+     * Marks that ads have started in a tab and records the start time.
+     * @param {number} tabId - The ID of the tab where ads started.
+     * @returns {Promise<boolean>}
+     */
     async tabAdsStarted(tabId) {
         const start = timeInSeconds();
         this._startTime.set(tabId, start);
@@ -61,6 +112,11 @@ class ExtensionState {
         return true;
     }
 
+    /**
+     * Marks that ads have stopped in a tab and clears the start time.
+     * @param {number} tabId - The ID of the tab where ads stopped.
+     * @returns {Promise<boolean>}
+     */
     async tabAdsStopped(tabId) {
         this._startTime.delete(tabId);
         await this._set({ startTime: this._startTime});
@@ -69,6 +125,11 @@ class ExtensionState {
         return true;
     }
 
+    /**
+     * Toggles debug mode for the extension.
+     * @param {number} tabId - The ID of the tab to send the toggle request from.
+     * @returns {Promise<boolean>}
+     */
     async toggleDebugMode(tabId) {
         console.debug(`ExtensionState.toggleDebugMode(${tabId})`);
         const response = await browser.tabs.sendMessage(tabId, {task: 'toggleDebug'});
@@ -82,6 +143,11 @@ class ExtensionState {
         return true;
     }
 
+    /**
+     * Toggles the visibility of the player in a tab.
+     * @param {number} tabId - The ID of the tab where the player should be toggled.
+     * @returns {Promise<boolean>}
+     */
     async togglePlayer(tabId) {
         console.debug(`ExtensionState.togglePlayer(${tabId})`);
         const currentMuteState = this._hiddenPlayers.get(tabId) || false;
@@ -100,8 +166,18 @@ class ExtensionState {
         return true;
     }
 
+    /**
+     * Toggles the mute state of a tab.
+     * @param {number} tabId - The ID of the tab to toggle mute for.
+     * @returns {Promise<boolean>}
+     */
     async toggleMute(tabId) {
-        console.debug(`ExtensionState.toggleMute(${tabId})`);
+        this.logger.debug(`ExtensionState.toggleMute(${tabId})`);
+         // proceed with toggling the mute
+        if (await this._isMutedByPlayer(tabId)) {
+            this.logger.debug(`ExtensionState.togglePlayerHide() Refusing to toggle Mute for a tab that the user muted: ${tabId}`);
+            return false;
+        }
         const currentMuteState = this._mutedTabs.get(tabId) || false;
         // mute/unmute the tab where ads are started/stopped
         const response = await browser.tabs.update(tabId, {muted: !currentMuteState});
@@ -117,11 +193,33 @@ class ExtensionState {
         await this._set({ mutedTabs: this._mutedTabs }).catch((error) => console.error("Error saving mutedTabs state:", error));
         return true;
     }
+
+    /**
+     * Checks if a tab is muted by the user.
+     * @param {number} tabId - The ID of the tab to check.
+     * @returns {Promise<boolean>}
+     */
+    async _isMutedByPlayer(tabId) {
+        // capture current tab muted state and see if the User is the reason why it's muted.
+        const { mutedInfo } = await browser.tabs.get(tabId) || {};
+        const { muted, reason } = mutedInfo || {};
+        return (muted && reason === "user");
+    }
 }
 
+/**
+ * This class processes web requests to determine if they are related to ad events
+ * and extracts relevant information from them.
+ */
 class RequestWrapper {
     AD_OPERATION_EVENT = 'RecordAdEvent';
     requestTypes = [];
+
+    /**
+     * Initializes a new instance of the RequestWrapper class.
+     * @param {Object} details - Details about the request, including method, requestBody, and tabId.
+     * @param {Object} options - Additional options, including logger and state.
+     */
     constructor({method, requestBody, tabId}, {logger, state}) {
         // Filter out non-POST requests
         if (method !== "POST") {
@@ -136,6 +234,10 @@ class RequestWrapper {
         this._processRequest(requestBody);
     }
 
+    /**
+     * Processes the request body to determine if it contains ad-related events.
+     * @param {Object} requestBody - The body of the request.
+     */
     _processRequest( requestBody = {} ) {
         const bytes = requestBody?.raw?.[0]?.bytes;
 
@@ -160,7 +262,7 @@ class RequestWrapper {
      * This method parses the JSON requestBody to determine if the
      * GraphQL payload contains metrics for starting video ads
      * and for ending video ads.
-     * @param {string} json
+     * @param {Object} json - The JSON payload to parse.
      * @returns {string}
      */
     _processJson(json = '') {
@@ -198,14 +300,18 @@ class RequestWrapper {
  * It also checks browser storage for a debugMode flag.
  */
 class BackgroundLogger {
+
+    /**
+     * Initializes a new instance of the BackgroundLogger class.
+     * @param {Object} options - Options for the logger, including debugMode.
+     */
     constructor({debugMode}) {
         this._debugMode = debugMode;
     }
 
     /**
-     * This is a catch-all logging call, that could support logging messages sent
-     * from other scripts.
-     * @param params
+     * Logs a message with optional parameters and level.
+     * @param {Object|string} params - The message or an object containing message, level, and additional arguments.
      */
     log(params) {
         if (typeof params === 'string') {
@@ -230,6 +336,11 @@ class BackgroundLogger {
         }
     }
 
+    /**
+     * Logs a general message.
+     * @param {string} message - The message to log.
+     * @param {...*} args - Additional arguments to log.
+     */
     logMessage(message, ...args) {
         if (this._debugMode) {
             if (Object.keys(args).length === 0) {
@@ -240,6 +351,11 @@ class BackgroundLogger {
         }
     }
 
+    /**
+     * Logs a debug message.
+     * @param {string} message - The message to log.
+     * @param {...*} args - Additional arguments to log.
+     */
     debug(message, ...args) {
         if (this._debugMode) {
             if (Object.keys(args).length === 0) {
@@ -250,6 +366,11 @@ class BackgroundLogger {
         }
     }
 
+    /**
+     * Logs a warning message.
+     * @param {string} message - The message to log.
+     * @param {...*} args - Additional arguments to log.
+     */
     warn(message, ...args) {
         if (Object.keys(args).length === 0) {
             console.warn(message);
@@ -258,6 +379,11 @@ class BackgroundLogger {
         }
     }
 
+    /**
+     * Logs an error message.
+     * @param {string} message - The message to log.
+     * @param {...*} args - Additional arguments to log.
+     */
     error(message, ...args) {
         if (Object.keys(args).length === 0) {
             console.error(message);
@@ -275,17 +401,23 @@ class BackgroundLogger {
  */
 class AdMonitor {
 
-    STATE_TIMEOUT_LIMIT;
+    STATE_TIMEOUT_LIMIT= 60;
 
+    /**
+     * Initializes a new instance of the AdMonitor class.
+     */
     constructor() {
         // Map to track which tabs were muted by the extension
-        this.STATE_TIMEOUT_LIMIT = 60;
         this.state = new ExtensionState();
         this.state.initialize().then(()=>{
             this.logger = new BackgroundLogger({debugMode: this.state.isDebug()});
         });
     }
 
+    /**
+     * Handles the start of ads in a tab.
+     * @param {number} tabId - The ID of the tab where ads started.
+     */
     handleAdStart(tabId) {
         this.logger.debug(`handleAdStart(tabId: ${tabId})`);
         // always update
@@ -300,6 +432,10 @@ class AdMonitor {
         }
     }
 
+    /**
+     * Handles the stop of ads in a tab.
+     * @param {number} tabId - The ID of the tab where ads stopped.
+     */
     handleAdStop(tabId) {
         this.logger.debug(`handleAdStop(tabId: ${tabId})`);
         if (this.state.isMuted(tabId)) {
@@ -315,9 +451,9 @@ class AdMonitor {
     }
 
     /**
-     * Makes Browser and Content adjustments according to the adStatus
-     * @param {string[]} adStatus
-     * @param {number} tabId
+     * Handles ad status changes based on detected events.
+     * @param {string[]} adStatus - An array of ad-related event statuses.
+     * @param {number} tabId - The ID of the tab to handle.
      */
     handleAdStatus(adStatus, tabId) {
         this.logger.debug(`AdMonitor.handleAdStatus(adStatus: ${adStatus}, tabId: ${tabId})`);
@@ -352,7 +488,10 @@ class AdMonitor {
         }
     }
 
-    // Request Listener
+    /**
+     * Processes a web request to determine if it contains ad-related events and handles them accordingly.
+     * @param {Object} details - Details about the request.
+     */
     handleRequest(details) {
         this.logger.debug("AdMonitor.handleRequest()", details);
         const { requestTypes, tabId } = new RequestWrapper(details, this);
@@ -363,6 +502,13 @@ class AdMonitor {
         }
     }
 
+    /**
+     * Handles messages sent from content scripts or other parts of the extension.
+     * @param {Object} data - The message data.
+     * @param {Object} sender - Information about the sender of the message.
+     * @param {Function} sendResponse - A function to send a response back to the sender.
+     * @returns {boolean}
+     */
     handleMessage(data, sender, sendResponse) {
         const { task, tabId, ...params } = data;
         this.logger.debug("AdMonitor.handleMessage()", task, tabId);
@@ -404,15 +550,21 @@ class AdMonitor {
 
 }
 
-// instantiate the main class for the background script.
+// Instantiate the main class for the background script and set up event listeners.
 const adMonitor = new AdMonitor();
 
+/**
+ * Listens for web requests to Twitch's GQL API and processes them to handle ad events.
+ */
 browser.webRequest.onBeforeRequest.addListener(
     adMonitor.handleRequest.bind(adMonitor),
     { urls: ["*://gql.twitch.tv/*"] },
     ["requestBody"]
 );
 
+/**
+ * Listens for messages from content scripts or other parts of the extension.
+ */
 browser.runtime.onMessage.addListener(
     adMonitor.handleMessage.bind(adMonitor),
 );
